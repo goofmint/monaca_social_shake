@@ -1,0 +1,177 @@
+<ons-page id="first-page">
+  <ons-toolbar>
+    <div class="center">友達一覧</div>
+  </ons-toolbar>
+
+  <div class="content" style="text-align: center">
+    <p>ユーザ名を変更できます</p>
+    <ons-input id="username" modifier="underbar" placeholder="Username" float></ons-input>
+    <ons-button id="updateUserName">変更</ons-button>
+    <p>
+      <ons-button id="shake">ふるふる</ons-button>
+      <ons-button id="logout">ログアウト</ons-button>
+    </p>
+    <p id="message">
+      
+    </p>
+    <ons-list id="friends">
+      <ons-list-header>友達</ons-list-header>
+    </ons-list>
+  </div>
+
+  <script>
+    // 画面を表示した際の処理
+    ons.getScriptPage().onShow = async function() {
+      // 既存の友達リストを取得して更新
+      const friends = await getFriends();
+      viewFriends(this, friends);
+    }
+    
+    // ページの初期化時に実行
+    ons.getScriptPage().onInit = async function() {
+      const shake = new Shake();
+      const user = ncmb.User.getCurrentUser();
+      const userName = this.querySelector('#username');
+      userName.value = user.userName;
+      
+      // ログアウトをクリックした時の処理
+      this.querySelector('#logout').onclick = async () => {
+        localStorage.clear();
+        location.reload();
+      }
+      
+      // ふるふるボタンを押した時の処理
+      this.querySelector('#shake').onclick = async () => {
+        // 位置情報を取得
+        const location = await getLocation();
+        // NCMBの位置情報オブジェクトを作成
+        const geo = new ncmb.GeoPoint(location.coords.latitude, location.coords.longitude);
+        // メッセージを更新
+        this.querySelector('#message').innerText = 'シェイクしてください';
+        // シェイクイベントを検知した時の処理
+        window.addEventListener('shake', async () => {
+          // シェイクイベントの検知を停止
+          shake.stop();
+          // シェイクを検知したのでメッセージを変更
+          this.querySelector('#message').innerText = '友達を探します';
+          // 自分の位置情報をmBaaSに登録
+          const place = await addPlace(geo);
+          // 自分と近い位置情報が来るのを待機
+          const friends = await getNearUser(geo);
+          if (!friends) {
+            // 友達がいない場合は終了
+            this.querySelector('#message').innerText = '近くにいませんでした';
+          } else {
+            // 友達がいた場合は次の画面に遷移
+            document.querySelector('#navigator').pushPage('page2.html', {data: {friends}});
+          }
+        }, false);
+        // シェイクイベントの検知を開始
+        shake.start();
+      };
+      
+      // ユーザ名を更新する処理
+      this.querySelector('#updateUserName').onclick = async () => {
+        try {
+          // ユーザ名を更新
+          await user
+            .set('userName', userName.value)
+            .update();
+          // ローカルのデータも更新
+          localStorage.setItem(`NCMB/${ncmb.apikey}/currentUser`, JSON.stringify(user));
+        } catch (e) {
+          console.log(e);
+        }
+      }
+    }
+    
+    // 既存の友達リストを取得する処理
+    async function getFriends() {
+      const user = ncmb.User.getCurrentUser();
+      try {
+        return await ncmb.User
+          .relatedTo(user, 'friends')
+          .fetchAll()
+      } catch (e) {
+        return [];
+      }
+    }
+    
+    // 近くのユーザを取得する処理
+    async function getNearUser(geo) {
+      let done = false;
+      // 10秒前から対象に
+      const time = new Date(Date.now() - 10000);
+      return new Promise((res, rej) => {
+        const user = ncmb.User.getCurrentUser();
+        let i = 0;
+        const id = setInterval(async () => {
+          if (i > 10) {
+            // 10秒待っても見つからなかったら終了
+            clearInterval(id);
+            return res(false);
+          }
+          // 重複処理防止用
+          if (done) return;
+          // 保存してある位置情報を検索
+          const Place = ncmb.DataStore('Place');
+          const places = await Place
+            // 単位はkm。0.02は20m
+            .withinKilometers("geo", geo, 0.02)
+            // 自分のデータは除外
+            .notEqualTo('user.objectId', user.objectId)
+            .include('user')
+            // 10秒前からのデータだけを対象にする
+            .greaterThanOrEqualTo('createDate', time)
+            .fetchAll();
+          // データがあれば終了
+          if (!done && places.length > 0) {
+            done = true;
+            clearInterval(id);
+            return res(places);
+          }
+          i += 1;
+        }, 1000);
+      })
+    }
+    
+    // 自分の位置情報をデータストアに保存する処理
+    async function addPlace(geo) {
+      // ログインユーザ
+      const user = ncmb.User.getCurrentUser();
+      // 権限の作成（自分は書き込み可、他の人は読み込みだけ可能）
+      const acl = new ncmb.Acl;
+      acl
+        .setPublicReadAccess(true)
+        .setUserWriteAccess(user, true);
+      // 位置情報をPlaceクラスに保存
+      const Place = ncmb.DataStore('Place');
+      const place = new Place;
+      return await place
+        .set('geo', geo)
+        .set('user', user)
+        .set('acl', acl)
+        .save();
+    }
+    
+    // 既存の友達リストを表示する処理
+    async function viewFriends(page, friends) {
+      const dom = page.querySelector('#friends');
+      for (const friend of friends) {
+        const li = document.createElement("ons-list-item");
+        li.innerHTML = friend.userName;
+        dom.appendChild(li);
+      }
+    }
+    
+    // Geo Location APIから位置情報を取得する処理
+    async function getLocation() {
+      return new Promise((res, rej) => {
+        navigator.geolocation.getCurrentPosition(res, rej, {
+          enableHighAccuracy: true
+        });
+      });
+    }
+    
+  </script>
+</ons-page>

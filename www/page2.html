@@ -1,0 +1,60 @@
+<ons-page id="second-page">
+  <ons-toolbar>
+    <div class="left"><ons-back-button>友達一覧</ons-back-button></div>
+    <div class="center">友達追加</div>
+  </ons-toolbar>
+
+  <div class="content" style="text-align: center">
+    <p>近くの友達です。つながりますか？</p>
+    <ons-list id="friends">
+      
+    </ons-list>
+  </div>
+  <script>
+    // 画面を表示した際の処理
+    ons.getScriptPage().onShow = function() {
+      const ary = [];
+      // 初期化
+      this.querySelector('#friends').innerHTML = '';
+      // ユーザを表示
+      for (const place of this.data.friends) {
+        // 同じユーザは表示しないように制御
+        if (ary.indexOf(place.user.objectId) > -1) continue;
+        ary.push(place.user.objectId);
+        // リストアイテムを生成
+        const li = createListItem(place.user);
+        // ons-listに追加
+        this.querySelector('#friends').appendChild(li);
+      }
+    }
+    
+    // ユーザごとのリストアイテムを作成する処理
+    function createListItem(user) {
+      const li = document.createElement("ons-list-item");
+      li.setAttribute('tappable', true);
+      li.innerHTML = user.userName;
+      li.user = user;
+      // アイテムをタップした際の処理を指定
+      li.onclick = createFriend;
+      return li;
+    }
+    
+    // ユーザをタップした際の処理
+    async function createFriend() {
+      // タップした対象を取得
+      const friend = this.user;
+      const user = ncmb.User.getCurrentUser();
+      // 多対多のリレーションを作成
+      const relation = new ncmb.Relation();
+      // リレーションにタップしたユーザを追加
+      relation.add(friend);
+      // データをセット
+      user.set('friends', relation);
+      // 保存処理実行
+      await user.update();
+      // 前の画面に戻る
+      document.querySelector('#navigator').popPage();
+    }
+    
+  </script>
+</ons-page>
